@@ -1,0 +1,302 @@
+---
+title: "DePasquale_et_al_Frontiers"
+author: "Allegra DePasquale"
+date: "11/17/2021"
+output: html_document
+---
+```{r}
+
+
+#Loading dependencies
+library(survival)
+library(NADA)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+library(survminer)
+library(readxl)
+library(forcats)
+library(lubridate)
+
+#Reading in height & site data
+CB_0.5 <- read.csv("CSVs/CB_0.5.csv")
+CB_3.5 <- read.csv("CSVs/CB_3.5.csv")
+CB_5.5 <- read.csv("CSVs/CB_5.5.csv")
+CB_7.5 <- read.csv("CSVs/CB_7.5.csv")
+CB_10 <- read.csv("CSVs/CB_10.csv")
+
+E_0.5 <- read.csv("CSVs/E_0.5.csv")
+E_3.5 <- read.csv("CSVs/E_3.5.csv")
+E_5.5 <- read.csv("CSVs/E_5.5.csv")
+E_7.5 <- read.csv("CSVs/E_7.5.csv")
+E_10 <- read.csv("CSVs/E_10.csv")
+
+
+#Combining csvs
+combined_df <- rbind(CB_0.5, CB_3.5, CB_5.5, CB_7.5, CB_10, E_0.5, E_3.5, E_5.5, E_7.5, E_10)
+
+combined_df <- combined_df %>% 
+           rename(
+           Date = ï..dd.mm.yyyy,
+   
+                         )
+
+#Renaming variables
+combined_df <- combined_df %>% 
+           rename(
+           AvgSpeed = WS, MaxSpeed = WSm)
+
+combined_df <- combined_df %>% 
+           rename(
+           Time = hh.mm.ss)
+
+#Setting Avg and Max Speed as numeric variables
+combined_df$AvgSpeed <- as.numeric(combined_df$AvgSpeed)
+combined_df$MaxSpeed <- as.numeric(combined_df$MaxSpeed)
+
+
+
+###Creating Censor Status variable
+combined_df <- combined_df %>% mutate(CensorStatus = ifelse(AvgSpeed >= 0.6, 1, 0))
+
+#Excluding incorrect time stamp
+combined_df <- filter(combined_df, Date != "1/1/2017")
+
+###Cox proportional hazard models for height and location
+
+RightCensoredData <- combined_df %>% mutate(InflatedSpeed = AvgSpeed + 10, RightCensoredSpeed = 10 - AvgSpeed)
+
+
+RightCensoredData$Height <- as.numeric(RightCensoredData$Height)
+
+fit <- coxph(Surv(RightCensoredSpeed, CensorStatus) ∼ Height * Location, data=RightCensoredData)
+
+summary(fit)
+
+
+RightCensoredData$Time <- parse_date_time(RightCensoredData$Time, "HMS")
+
+RightCensoredData$Hour <- hour(RightCensoredData$Time)
+
+RightCensoredData$Hour <- as.numeric(RightCensoredData$Hour)
+
+
+###Cox proportional hazard models for hour and location
+
+RightCensoredData$Time <- parse_date_time(RightCensoredData$Time, "HMS")
+RightCensoredData$Hour <- hour(RightCensoredData$Time)
+
+RightCensoredData$Hour <- as.numeric(RightCensoredData$Hour)
+
+model <- coxph(formula = Surv(RightCensoredSpeed, CensorStatus) ~ Hour * Location, data = RightCensoredData)
+
+TimeModel <- coxph(Surv(WindRight5, CensorStatus) ~ sin(2* pi * NumericHour/24) * Location +
+                     cos(2 * pi * NumericHour/24) * Location, 
+                                    data = wind)
+
+#Plotting results of cox proportional hazard model
+
+#Creating CensorStatusBoolean variable for use in the cenfit function
+RightCensoredData <- RightCensoredData %>% mutate(CensorStatusBoolean = ifelse(AvgSpeed >= 0.6, FALSE, TRUE))
+
+RightCensoredData$Height <- as.factor(RightCensoredData$Height)
+RightCensoredData$AvgSpeed <- as.numeric(RightCensoredData$AvgSpeed)
+
+
+###Kaplan-Meier estimates for height and location
+DataCB <- filter(RightCensoredData, Location == "CB")
+DataE <- filter(RightCensoredData, Location == "E")
+
+
+
+with(DataCB, cenfit(obs=AvgSpeed, censored = CensorStatusBoolean, groups=Height))
+
+with(DataE, cenfit(obs=AvgSpeed, censored = CensorStatusBoolean, groups=Height))
+
+#Reading in KM estimates
+windKM <- read_xlsx("WindSpeedKM_AD.xlsx") %>% 
+  mutate(Turb = WindSD/WindMean) 
+
+
+#Wind speed plot
+veloPlot <- ggplot(data = windKM, aes(x = Height, y = WindMean, color = Site)) + 
+  geom_pointrange(aes(ymin = WindMean - WindSD, ymax = WindMean + WindSD), size = 1, position = position_dodge(w = 0.8)) +
+   scale_color_manual(values=c("seagreen", "sienna3")) +
+  coord_flip() +
+  labs(y ="Mean Air Speed (m/s)", x = "Height (m)") +
+  theme_bw() +
+  theme(legend.position = "none") 
+
+
+#Turbulence plot
+turbPlot <- ggplot(data = windKM, aes(x = Height, y = Turb, color = Site)) + 
+  geom_point(size = 4, position = position_dodge(w = 0.8)) +
+  scale_color_manual(values=c("seagreen", "sienna3")) +
+  coord_flip() +
+  labs(y ="Turbulence Intensity", x = "Height (m)") +
+  theme_bw() +
+  theme(axis.title.y=element_blank(), axis.text.y=element_blank(), axis.ticks.y=element_blank(), legend.position = c(0.35, .88)) 
+
+
+#Combining air speed and turbulence plots
+grid.arrange(veloPlot, turbPlot, ncol=2, nrow =1, widths = c(1, 0.6))
+
+
+
+
+
+###Kaplan-Meier estimates for hour and location
+
+###CB
+DataCB$Time <- parse_date_time(DataCB$Time, "HMS")
+
+DataCB$Hour <- hour(DataCB$Time)
+
+DataCB$Hour <- as.factor(DataCB$Hour)
+
+fit <- with(DataCB, cenfit(obs=AvgSpeed, censored = CensorStatusBoolean, groups=Hour))
+
+
+CBHour <- read.csv("CBHour.csv")
+
+CBHour <- CBHour %>% 
+           rename(
+           Hour = ï..Hour,
+   
+                         )
+
+
+
+###E
+
+
+DataE$Time <- parse_date_time(DataE$Time, "HMS")
+
+DataE$Hour <- hour(DataE$Time)
+
+DataE$Hour <- as.factor(DataE$Hour)
+
+with(DataE, cenfit(obs=AvgSpeed, censored = CensorStatusBoolean, groups=Hour))
+
+EHour <- read.csv("HourE.csv")
+
+EHour <- EHour %>% 
+           rename(
+           Hour = ï..Hour,
+   
+                         )
+
+
+
+
+
+#Creating dummy variable to calculate kaplan meier estimates for all heights, hours, and locations
+
+RightCensoredData$Hour <- as.factor(RightCensoredData$Hour)
+RightCensoredData$Dummy <- as.factor(RightCensoredData$Dummy)
+
+RightCensoredData <- RightCensoredData %>% mutate(Dummy= paste(Location, Height, Hour, sep = "_"))
+
+options(max.print=1000000)
+
+#Kaplan Meier estimates for average speed and max speed variables at different heights, locations, and hours
+combined_site_height_hour <- with(RightCensoredData, cenfit(obs=AvgSpeed, censored = CensorStatusBoolean, groups=Dummy))
+
+
+#Results from above are copied and pasted to .csv, and read in:
+height_site_hour <- read.csv("height_site_hour.csv") %>% 
+  mutate(Turb = sd/mean)
+
+height_site_hour <- height_site_hour %>% 
+           rename(
+           Location = ï..Location,
+   
+                         )
+#Setting height and daynight as factors
+height_site_hour$Height <- as.factor(height_site_hour$Height)
+height_site_hour$DayNight <- as.factor(height_site_hour$DayNight)
+
+#reversing height factor levels
+height_site_hour$Height <- fct_rev(height_site_hour$Height)
+
+#plotting average wind speeds across hours, heights, and time of day
+height_site_hour_plot <- ggplot(data = height_site_hour, aes(x = Hour, y = mean, fill = DayNight)) +
+geom_pointrange(aes(y = mean, ymin = mean - sd, ymax = mean + sd, color = DayNight)) + 
+scale_color_manual(values = c("Day" = "darkgoldenrod2",
+                                "Night"="cornflowerblue")) +
+facet_grid(Height~Location) +
+labs(y="Average Wind Speed (m/s)") +
+theme_bw() +
+theme(panel.spacing.y = unit(1, "lines"), axis.text = element_text(size = 11), axis.title = element_text(size=12), legend.text = element_text(size=12), strip.text = element_blank(), legend.title = element_blank()) 
+
+
+
+#SAving figure as .tiff
+ggsave("diurnal_wind_speed.pdf", plot =  height_site_hour_plot)
+
+
+#Grouping above data by location, hour, and daynight 
+grouped <- height_site_hour %>%
+            group_by(Location, Hour, DayNight) %>%
+            summarise(AvgSpeed = mean(mean),
+                      AvgSD = mean(sd))
+
+#Plotting average speed over day night cycle for different locations
+ggplot(data = grouped, aes(x = Hour, y = AvgSpeed, fill = DayNight)) +
+geom_pointrange(aes(y = AvgSpeed, ymin = AvgSpeed - AvgSD, ymax = AvgSpeed + AvgSD, color = DayNight)) + 
+#geom_point(fill = "DayNight") + 
+scale_color_manual(values = c("Day" = "darkgoldenrod2",
+                                "Night"="cornflowerblue")) +
+#geom_errorbar(aes(ymin=AvgSpeed-AvgSD, ymax=AvgSpeed+AvgSD), width=.2,
+                 #position=position_dodge(.9)) +
+labs(y="Average Wind Speed (m/s)") +
+coord_polar(start = -6.5/360*2*pi) +
+facet_wrap(~Location) +
+theme_bw() +
+theme(axis.text.y = element_blank(),
+         axis.ticks.y = element_blank(), axis.title.x = element_blank(),  legend.position = "bottom")
+
+
+
+#KM estimates for max speed variable
+
+combined_site_height_hour_max <- with(RightCensoredData, cenfit(obs=MaxSpeed, censored = CensorStatusBoolean, groups=Dummy))
+
+
+#reading in results from above
+height_site_hour_max <- read.csv("height_site_hour_max.csv") %>% 
+  mutate(Turb = sd/mean)
+
+height_site_hour_max <- height_site_hour_max %>% 
+           rename(
+           Location = ï..Location,
+   
+                         )
+
+height_site_hour_max$Height <- as.factor(height_site_hour_max$Height)
+height_site_hour_max$DayNight <- as.factor(height_site_hour_max$DayNight)
+
+
+height_site_hour_max$Height <- fct_rev(height_site_hour_max$Height)
+
+
+grouped_max <- height_site_hour_max %>%
+            group_by(Location, Hour, DayNight) %>%
+            summarise(MaxSpeed = mean(mean),
+                      AvgSD = mean(sd))
+
+ggplot(data = grouped_max, aes(x = Hour, y = MaxSpeed, fill = DayNight)) +
+geom_col(color = "black")+ 
+scale_fill_manual(values = c("Day" = "darkgoldenrod2",
+                                "Night"="cornflowerblue")) +
+geom_errorbar(aes(ymin=MaxSpeed-AvgSD, ymax=MaxSpeed+AvgSD), width=.2,
+                 position=position_dodge(.9)) +
+labs(y="Max Air Speed (m/s)") +
+coord_polar(start = -6.5/360*2*pi) +
+facet_wrap(~Location) +
+theme_bw() +
+theme(axis.text.y = element_blank(),
+         axis.ticks.y = element_blank(), axis.title.x = element_blank(), legend.title = element_blank(), legend.position = "bottom")
+
+
+```
