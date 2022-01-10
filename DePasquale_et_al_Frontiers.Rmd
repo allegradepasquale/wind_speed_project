@@ -1,0 +1,61 @@
+---
+title: "DePasquale_et_al_Frontiers"
+author: "Allegra N. DePasquale", "Jeremy D. Hogan"
+date: "1/5/2022"
+output: html_document
+---
+```{r}
+#Loading dependencies
+library(survival)
+library(NADA)
+library(ggplot2)
+library(dplyr)
+
+#Loading data
+windRaw <- read.csv("WindData.csv") %>% filter(Date != "1/1/2017")
+
+
+#Creating dataframe for analysis
+wind <- windRaw %>% mutate(Date = as.Date(Date, "%d/%m/%Y"),
+                           HeightFactor = factor(Height),
+                           WD = as.numeric(WD),
+                           WindRight5 = 5 - AvgSpeed,
+                           CensorStatus = ifelse(AvgSpeed >= 0.6, 1, 0),
+                           CensorTrueFalse = ifelse(CensorStatus == 1, FALSE, TRUE),
+                           Time = hms::as_hms(Time),
+                           Hour = hour(Time),
+                           NumericSec = as.numeric(seconds(Time)),
+                           NumericMinute = (NumericSec/60),
+                           NumericHour = NumericMinute/60,
+                           NumericCirc = NumericSec/86400) 
+
+summary(wind)
+
+
+#Removing WD column that contains NAs
+wind <- select(wind, -WD)
+
+#Kaplan Meier estimates
+
+wind$Height <- as.factor(wind$Height)
+with(wind, cenfit(obs=AvgSpeed, censored = CensorTrueFalse, groups=Height))
+
+wind$Hour <- as.factor(wind$Hour)
+with(wind, cenfit(obs=AvgSpeed, censored = CensorTrueFalse, groups=Hour))
+
+## Cox proportional hazard models 
+
+#Height model
+
+HeightModel <- coxph(Surv(WindRight5, CensorStatus) ~ Location * Height, data = wind)
+
+summary(HeightModel)
+
+
+#Time model
+TimeModel <- coxph(Surv(WindRight5, CensorStatus) ~ sin(2* pi * NumericHour/24) * Location +
+                     cos(2 * pi * NumericHour/24) * Location, 
+                                    data = wind)
+summary(TimeModel)
+
+```
