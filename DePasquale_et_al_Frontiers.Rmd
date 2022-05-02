@@ -37,8 +37,7 @@ wind <- select(wind, -WD)
 
 #Kaplan Meier estimates
 
-wind$Height <- as.factor(wind$Height)
-with(wind, cenfit(obs=AvgSpeed, censored = CensorTrueFalse, groups=Height))
+with(wind, cenfit(obs=AvgSpeed, censored = CensorTrueFalse, groups=HeightFactor))
 
 wind$Hour <- as.factor(wind$Hour)
 with(wind, cenfit(obs=AvgSpeed, censored = CensorTrueFalse, groups=Hour))
